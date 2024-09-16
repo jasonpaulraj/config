@@ -1,0 +1,22 @@
+{
+    "applicationName": "verrano",
+    "deploymentGroupName": "staging",
+    "revision": {
+        "revisionType": "S3",
+        "s3Location": {
+            "bucket": "verrano",
+            "key": "staging/dist.zip",
+            "bundleType": "zip"
+        }
+    },
+    "targetInstances": {
+        "tagFilters": [
+            {
+                "Key": "Name",
+                "Value": "verrano_staging",
+                "Type": "KEY_AND_VALUE"
+            }
+        ]
+    },
+    "fileExistsBehavior": "OVERWRITE"
+}

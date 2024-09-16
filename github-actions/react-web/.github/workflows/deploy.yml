@@ -1,0 +1,45 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.16.0"
+      - run: npm ci
+      - run: npm run build --if-present
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_ASSET_URL: ${{ vars.VITE_ASSET_URL }}
+          VITE_SECRET_KEY: ${{ secrets.VITE_SECRET_KEY }}
+      - name: Prepare artifact
+        run: |
+          cp appspec.yml scripts/*.sh dist/
+          zip -r dist.zip dist
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE }}
+          role-session-name: UploadToS3
+      - name: Upload to S3
+        run: |
+          aws s3 cp dist.zip ${{ secrets.AWS_S3_Bucket }}
+      - name: Deploy to EC2
+        run: |
+          aws deploy create-deployment \
+          --cli-input-json file://deploy.json \
+          --ignore-application-stop-failures
+

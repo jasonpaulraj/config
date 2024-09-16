@@ -1,0 +1,46 @@
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+sensor: !include sensors.yaml
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 127.0.0.1
+template:
+  - sensor:
+      - name: Total Power Consumption
+        unique_id: total_power_consumption
+        unit_of_measurement: "kW"
+        state_class: measurement
+        device_class: power
+        state: >
+          {{  (states('sensor.office_computer_power')|float(0) + 
+              states('sensor.washing_machine_power')|float(0) + 
+              states('sensor.tv_smart_socket_power')|float(0)) / 1000
+          }}
+
+      - name: Total Energy Consumption
+        unique_id: total_energy_consumption
+        unit_of_measurement: "kWh"
+        state_class: total_increasing
+        device_class: energy
+        state: >
+          {{  (states('sensor.ryzen_3900x')|float(0) + 
+              states('sensor.washing_machine_usage')|float(0) + 
+              states('sensor.tv_lights')|float(0)) 
+          }}
+
+      - name: Total Energy Cost
+        device_class: energy
+        unit_of_measurement: "MYR"
+        unique_id: energy_meter_consumption_in_price
+        state: "{{ 
+        states('sensor.total_energy_consumption')|float(0)*0.435 if states('sensor.total_energy_consumption')|float(0) < 200 else states('sensor.total_energy_consumption')|float(0)*0.59 }}"

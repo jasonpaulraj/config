@@ -1,0 +1,31 @@
+# - platform: integration
+#   source: sensor.office_computer_power
+#   name: Ryzen 3900X | Tuya Smart Switch
+#   unit_prefix: k
+#   method: left
+#   round: 2
+#   unique_id: tuya.office_computer_power
+
+# - platform: sensor
+#   name: Total Power Consumption
+#   unique_id: total_power_consumption
+#   unit_of_measurement: "kW"
+#   state_class: measurement
+#   device_class: power
+#   state: >
+#     {{  (states('sensor.office_computer_power')|float(0) +
+#         states('sensor.washing_machine_power')|float(0) +
+#         states('sensor.tv_smart_socket_power')|float(0)) / 1000
+#     }}
+
+# - platform: sensor
+#   name: Total Energy Consumption
+#   unique_id: total_energy_consumption
+#   unit_of_measurement: "kWh"
+#   state_class: total_increasing
+#   device_class: energy
+#   state: >
+#     {{  (states('sensor.ryzen_3900x')|float(0) +
+#         states('sensor.washing_machine_usage')|float(0) +
+#         states('sensor.tv_lights')|float(0)) / 1000
+#     }}

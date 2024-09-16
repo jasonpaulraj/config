@@ -1,0 +1,2 @@
+* * * * * cd /var/www/html/mov-mm-backend && /usr/local/bin/php artisan schedule:run >> /dev/null 2>&1
+# extra line makes a valid cron
