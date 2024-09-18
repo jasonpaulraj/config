@@ -1,2 +1,2 @@
-# homelab
-Configuration files for Home Lab
+# Configurations
+Configuration files for various services & development tools 
