@@ -245,6 +245,14 @@ successful_clones=0
 already_exists=0
 failed_clones=0
 
+# Create a tracking file if it doesn't exist
+TRACKING_FILE="$DownloadPath/.repo_tracking.txt"
+if [ ! -f "$TRACKING_FILE" ]; then
+    echo -e "⏳ Creating repository tracking file..."
+    touch "$TRACKING_FILE"
+    echo -e "✅ Tracking file created at: $TRACKING_FILE"
+fi
+
 echo -e "\n╔════════════════════════════════════════╗"
 echo -e "║         PROCESSING REPOSITORIES        ║"
 echo -e "╚════════════════════════════════════════╝"
@@ -254,7 +262,7 @@ echo "$Repos" | jq -r --arg Visibility "$Visibility" '
     if $Visibility == "both" then .[]
     elif $Visibility == "public" then .[] | select(.private == false)
     elif $Visibility == "private" then .[] | select(.private == true)
-    else empty end | .clone_url' | while read -r RepoCloneUrl; do
+    else empty end | .clone_url, .pushed_at' | while read -r RepoCloneUrl && read -r RepoPushedAt; do
     RepoName=$(basename -s .git "$RepoCloneUrl")
 
     # Check if repository already exists in the target directory
@@ -264,41 +272,64 @@ echo "$Repos" | jq -r --arg Visibility "$Visibility" '
         echo -e "╚════════════════════════════════════════╝"
         echo -e "📁 Repository already exists: $RepoName"
 
-        # Check if it's a git repository
-        if [ -d "$DownloadPath/$RepoName/.git" ]; then
-            # Get the last commit date
-            cd "$DownloadPath/$RepoName"
-            last_commit_date=$(git log -1 --format="%ct" 2>/dev/null)
+        # Check if repo exists in tracking file
+        last_downloaded=""
+        if grep -q "^$RepoName," "$TRACKING_FILE"; then
+            last_downloaded=$(grep "^$RepoName," "$TRACKING_FILE" | cut -d',' -f3)
+            echo -e "🕒 Last downloaded on: $last_downloaded"
+            
+            # Convert dates to timestamps for comparison
             current_date=$(date +%s)
-
-            # Calculate days since last commit (86400 seconds in a day)
-            days_since_last_commit=$(((current_date - last_commit_date) / 86400))
-
-            echo -e "🕒 Last commit was $days_since_last_commit days ago."
-
-            # If repository is older than 30 days, update it
-            if [ $days_since_last_commit -gt 30 ]; then
-                echo -e "⏳ Repository is outdated. Updating to latest version..."
-                git_update_output=$(git pull 2>&1)
-                git_update_status=$?
-
-                if [ $git_update_status -eq 0 ]; then
-                    echo -e "✅ Successfully updated $RepoName to the latest version."
-                    ((successful_clones++))
-                else
-                    echo -e "❌ Failed to update repository: $git_update_output"
-                    echo -e "ℹ️  You may need to resolve conflicts manually."
-                    ((failed_clones++))
-                fi
+            last_download_timestamp=$(date -d "$last_downloaded" +%s 2>/dev/null)
+            
+            # If date conversion failed (possibly due to different date format), force update
+            if [ $? -ne 0 ]; then
+                echo -e "⚠️ Could not parse last download date. Will update repository."
+                update_needed=true
             else
-                echo -e "✅ Repository is recent. Skipping update."
+                # Calculate days since last download (86400 seconds in a day)
+                days_since_download=$(( (current_date - last_download_timestamp) / 86400 ))
+                echo -e "ℹ️  Days since last download: $days_since_download"
+                
+                # Check if update is needed (more than 1 day)
+                if [ $days_since_download -gt 1 ]; then
+                    echo -e "⏳ Repository download is outdated. Will update repository."
+                    update_needed=true
+                else
+                    echo -e "✅ Repository was recently downloaded. Skipping update."
+                    update_needed=false
+                fi
             fi
-
-            cd - >/dev/null
         else
-            echo -e "⚠️ Folder exists but is not a git repository."
+            echo -e "ℹ️  Repository not found in tracking file. Will update repository."
+            update_needed=true
         fi
-
+        
+        if [ "$update_needed" = true ]; then
+            echo -e "⏳ Removing existing repository folder..."
+            rm -rf "$DownloadPath/$RepoName"
+            
+            echo -e "⏳ Re-downloading repository..."
+            git clone --progress "$RepoCloneUrl" "$DownloadPath/$RepoName"
+            
+            if [ $? -eq 0 ]; then
+                echo -e "✅ Successfully re-downloaded $RepoName"
+                # Update tracking file with current date
+                current_date_formatted=$(date "+%Y-%m-%d %H:%M:%S")
+                if grep -q "^$RepoName," "$TRACKING_FILE"; then
+                    # Update existing entry
+                    sed -i "s|^$RepoName,.*|$RepoName,$DownloadPath/$RepoName,$current_date_formatted|" "$TRACKING_FILE"
+                else
+                    # Add new entry
+                    echo "$RepoName,$DownloadPath/$RepoName,$current_date_formatted" >> "$TRACKING_FILE"
+                fi
+                ((successful_clones++))
+            else
+                echo -e "❌ Failed to re-download repository"
+                ((failed_clones++))
+            fi
+        fi
+        
         echo -e "══════════════════════════════════════════"
         ((already_exists++))
         continue
@@ -361,18 +392,21 @@ echo "$Repos" | jq -r --arg Visibility "$Visibility" '
         ((failed_clones++))
     else
         echo -e "✅ Successfully cloned $RepoName"
+        # Add entry to tracking file with current date
+        current_date_formatted=$(date "+%Y-%m-%d %H:%M:%S")
+        echo "$RepoName,$DownloadPath/$RepoName,$current_date_formatted" >> "$TRACKING_FILE"
         ((successful_clones++))
     fi
 done
 
 # Print summary statistics
-echo -e "\n╔════════════════════════════════════════╗"
-echo -e "║       REPOSITORY DOWNLOAD SUMMARY      ║"
+echo -e "\n╔══════════════════════════════════════════╗"
+echo -e "║       REPOSITORY DOWNLOAD SUMMARY        ║"
 echo -e "╚══════════════════════════════════════════╝"
 echo -e "📊 Total repositories found: $repo_count"
 echo -e "✅ Successfully cloned: $successful_clones"
 echo -e "📁 Already existing: $already_exists"
 echo -e "❌ Failed to clone: $failed_clones"
-echo -e "══════════════════════════════════════════"
+echo -e "══════════════════════════════════════════════════════════════════"
 echo -e "🎉 All $RepoType ($Visibility) repositories have been processed."
-echo -e "══════════════════════════════════════════"
+echo -e "══════════════════════════════════════════════════════════════════"
