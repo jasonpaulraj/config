@@ -128,7 +128,6 @@ call :log "Running 7-Zip compression (this may take a while)..." "🔄"
 
 :: Log completion and capture the error level
 set COMPRESSION_ERROR=%ERRORLEVEL%
-call :log "7-Zip compression completed with exit code: %COMPRESSION_ERROR%" "📦"
 
 :: Check if backup was successful
 if %COMPRESSION_ERROR% EQU 0 (
@@ -136,8 +135,10 @@ if %COMPRESSION_ERROR% EQU 0 (
     
     :: Get archive size
     for %%A in ("%ARCHIVE_NAME%") do set ARCHIVE_SIZE=%%~zA
-    set /a ARCHIVE_SIZE_MB=%ARCHIVE_SIZE% / 1048576
-    set /a ARCHIVE_SIZE_KB=(%ARCHIVE_SIZE% %% 1048576) / 1024
+    
+    :: Fix division issue by using SET /A with parentheses
+    set /a "ARCHIVE_SIZE_MB=ARCHIVE_SIZE / 1048576"
+    set /a "ARCHIVE_SIZE_KB=(ARCHIVE_SIZE %% 1048576) / 1024"
     
     call :log "Archive size: %ARCHIVE_SIZE_MB%.%ARCHIVE_SIZE_KB% MB" "📊"
     
@@ -145,26 +146,28 @@ if %COMPRESSION_ERROR% EQU 0 (
     set SOURCE_SIZE=0
     for /f "tokens=3" %%a in ('dir /s /a "%SOURCE_DIR%" ^| findstr "File(s)"') do set SOURCE_SIZE=%%a
     
-    :: Convert source size to MB for display
-    set /a SOURCE_SIZE_MB=%SOURCE_SIZE% / 1048576
-    set /a SOURCE_SIZE_KB=(%SOURCE_SIZE% %% 1048576) / 1024
+    :: Convert source size to MB for display with fixed syntax
+    set /a "SOURCE_SIZE_MB=SOURCE_SIZE / 1048576"
+    set /a "SOURCE_SIZE_KB=(SOURCE_SIZE %% 1048576) / 1024"
     call :log "Source directory size: %SOURCE_SIZE_MB%.%SOURCE_SIZE_KB% MB" "📊"
     
-    :: Calculate compression ratio (with error handling)
-    if %SOURCE_SIZE% NEQ 0 (
-        set /a COMPRESSION_PERCENT=(%ARCHIVE_SIZE% * 100) / %SOURCE_SIZE%
-        set /a SAVINGS_PERCENT=100 - %COMPRESSION_PERCENT%
-        call :log "Compression ratio: %COMPRESSION_PERCENT%%% of original size (saved %SAVINGS_PERCENT%%% space)" "📉"
+    :: Calculate compression ratio (with error handling) - Fix the conditional check
+    if not "!SOURCE_SIZE!"=="0" (
+        set /a "COMPRESSION_PERCENT=(ARCHIVE_SIZE * 100) / SOURCE_SIZE"
+        set /a "SAVINGS_PERCENT=100 - COMPRESSION_PERCENT"
+        call :log "Compression ratio: !COMPRESSION_PERCENT!%% of original size (saved !SAVINGS_PERCENT!%% space)" "📉"
     ) else (
         call :log "Could not calculate compression ratio - source size is zero or unknown" "⚠️"
     )
     
-    call :send_webhook "SUCCESS" "Backup completed successfully. Archive size: %ARCHIVE_SIZE_MB%.%ARCHIVE_SIZE_KB% MB (saved %SAVINGS_PERCENT%%% space)"
+    call :send_webhook "SUCCESS" "Backup completed successfully. Archive size: %ARCHIVE_SIZE_MB%.%ARCHIVE_SIZE_KB% MB"
 ) else (
     call :log "Backup failed with error code: %COMPRESSION_ERROR%" "❌"
     type "%GZIP_LOG_FILE%" >> "%MAIN_LOG_FILE%"
     call :send_webhook "ERROR" "Backup failed with error code: %COMPRESSION_ERROR%"
 )
+
+call :log "7-Zip compression completed with exit code: %COMPRESSION_ERROR%" "📦"
 
 :: Clean up old backups
 call :log "Cleaning up old backups..." "🧹"
