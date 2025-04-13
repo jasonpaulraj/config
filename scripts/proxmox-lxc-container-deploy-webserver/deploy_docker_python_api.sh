@@ -233,6 +233,112 @@ for pkg in $ESSENTIAL_PACKAGES; do
     check_install_package "$pkg"
 done
 
+# Ask about the type of system to install dependencies for
+echo "What type of system are you deploying?"
+echo "1) Python (Generic)"
+echo "2) FastAPI/Python"
+echo "3) PHP"
+echo "4) Laravel/PHP"
+echo "5) Go"
+echo "6) React/Web"
+echo "7) Node.js"
+
+SYSTEM_TYPE=""
+while [ -z "$SYSTEM_TYPE" ]; do
+    printf "Select an option [1-7]: "
+    read -r system_option
+    case $system_option in
+    1)
+        SYSTEM_TYPE="python"
+        echo "Installing Python dependencies..."
+        check_install_package "python3-pip"
+        check_install_package "python3-dev"
+        check_install_package "gcc"
+        check_install_package "libffi-dev"
+        check_install_package "libssl-dev"
+        ;;
+    2)
+        SYSTEM_TYPE="fastapi"
+        echo "Installing FastAPI dependencies..."
+        check_install_package "python3-pip"
+        check_install_package "python3-dev"
+        check_install_package "gcc"
+        check_install_package "libffi-dev"
+        check_install_package "libssl-dev"
+        check_install_package "python3-venv"
+        ;;
+    3)
+        SYSTEM_TYPE="php"
+        echo "Installing PHP dependencies..."
+        check_install_package "php"
+        check_install_package "php-fpm"
+        check_install_package "php-cli"
+        check_install_package "php-common"
+        check_install_package "php-mysql"
+        check_install_package "php-zip"
+        check_install_package "php-gd"
+        check_install_package "php-mbstring"
+        check_install_package "php-curl"
+        check_install_package "php-xml"
+        check_install_package "php-bcmath"
+        check_install_package "php-json"
+        ;;
+    4)
+        SYSTEM_TYPE="laravel"
+        echo "Installing Laravel dependencies..."
+        check_install_package "php"
+        check_install_package "php-fpm"
+        check_install_package "php-cli"
+        check_install_package "php-common"
+        check_install_package "php-mysql"
+        check_install_package "php-zip"
+        check_install_package "php-gd"
+        check_install_package "php-mbstring"
+        check_install_package "php-curl"
+        check_install_package "php-xml"
+        check_install_package "php-bcmath"
+        check_install_package "php-json"
+        check_install_package "composer"
+        check_install_package "nodejs"
+        check_install_package "npm"
+        ;;
+    5)
+        SYSTEM_TYPE="go"
+        echo "Installing Go dependencies..."
+        check_install_package "golang-go"
+        check_install_package "gcc"
+        check_install_package "g++"
+        check_install_package "make"
+        ;;
+    6)
+        SYSTEM_TYPE="react"
+        echo "Installing React/Web dependencies..."
+        # Add Node.js repository for latest version
+        if [ ! -f /etc/apt/sources.list.d/nodesource.list ]; then
+            curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        fi
+        check_install_package "nodejs"
+        check_install_package "npm"
+        # Install global packages
+        npm install -g serve
+        ;;
+    7)
+        SYSTEM_TYPE="nodejs"
+        echo "Installing Node.js dependencies..."
+        # Add Node.js repository for latest version
+        if [ ! -f /etc/apt/sources.list.d/nodesource.list ]; then
+            curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        fi
+        check_install_package "nodejs"
+        check_install_package "npm"
+        check_install_package "build-essential"
+        ;;
+    *)
+        echo "Please select a valid option (1-7)."
+        ;;
+    esac
+done
+
 # SSH server setup
 if systemctl list-unit-files | grep -q ssh.service; then
     echo "SSH server is installed. Checking status..."
