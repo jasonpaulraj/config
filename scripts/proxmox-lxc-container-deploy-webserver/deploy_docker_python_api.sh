@@ -235,6 +235,7 @@ done
 
 # Ask about the type of system to install dependencies for
 echo "What type of system are you deploying?"
+echo "0) Skip/No dependencies needed"
 echo "1) Python (Generic)"
 echo "2) FastAPI/Python"
 echo "3) PHP"
@@ -248,6 +249,10 @@ while [ -z "$SYSTEM_TYPE" ]; do
     printf "Select an option [1-7]: "
     read -r system_option
     case $system_option in
+    0)
+        SYSTEM_TYPE="none"
+        echo "Skipping dependency installation..."
+        ;;
     1)
         SYSTEM_TYPE="python"
         echo "Installing Python dependencies..."
@@ -1098,8 +1103,6 @@ if confirm "Use Docker deployment"; then
         if [ "$PYTHON_FRAMEWORK" = "fastapi" ]; then
             # FastAPI specific docker-compose
             cat >"$APP_DIR/docker-compose.yml" <<EOF
-version: '3'
-
 services:
   api:
     build:
@@ -1144,8 +1147,6 @@ EOF
         elif [ "$PYTHON_FRAMEWORK" = "flask" ]; then
             # Flask specific docker-compose
             cat >"$APP_DIR/docker-compose.yml" <<EOF
-version: '3'
-
 services:
   api:
     build:
