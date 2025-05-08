@@ -395,6 +395,20 @@ if confirm "Create new user"; then
         echo "User $NEW_USER is already in the sudo group"
     fi
 
+    # Check if www-data group exists and offer to add user to it
+    if getent group www-data >/dev/null; then
+        echo "Do you want to add $NEW_USER to the www-data group for web server access?"
+        if confirm "Add to www-data group"; then
+            usermod -aG www-data "$NEW_USER"
+            echo "Added $NEW_USER to www-data group"
+        fi
+    else
+        echo "Creating www-data group and adding $NEW_USER..."
+        groupadd www-data
+        usermod -aG www-data "$NEW_USER"
+        echo "Created www-data group and added $NEW_USER"
+    fi
+
     # Set up SSH key for the user (works for both new and existing users)
     echo "Do you want to add or update an SSH public key for $NEW_USER?"
     if confirm "Add/update SSH key"; then
@@ -469,6 +483,28 @@ else
     systemctl start docker
 fi
 
+# Ensure www-data group exists
+if ! getent group www-data >/dev/null; then
+    echo "Creating www-data group..."
+    groupadd www-data
+fi
+
+# Set Docker socket permissions for www-data
+echo "Setting Docker socket permissions for www-data..."
+if [ -S /var/run/docker.sock ]; then
+    chown root:www-data /var/run/docker.sock
+    chmod 660 /var/run/docker.sock
+
+    # Make permission change persistent
+    echo 'DOCKER_OPTS="-G www-data"' >/etc/default/docker
+    systemctl daemon-reload
+    systemctl restart docker
+
+    echo "Docker socket permissions updated for www-data group"
+else
+    echo "Warning: Docker socket not found at /var/run/docker.sock"
+fi
+
 # Install Docker Compose v2
 echo "Checking for Docker Compose..."
 if command_exists docker-compose; then
@@ -529,43 +565,82 @@ elif [ "$DISTRO" = "alpine" ]; then
     NGINX_USER="nginx"
 fi
 
-# First check if nginx is already installed
-if dpkg -l | grep -q nginx; then
-    echo "Nginx appears to be installed. Checking for issues..."
-    if ! systemctl is-active --quiet nginx; then
-        echo "Nginx service is not running. Attempting to fix by reinstalling..."
-        apt-get remove --purge -y nginx nginx-common nginx-full
-        rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
+# Ask user if they want to install Nginx
+echo "Do you want to install and configure Nginx?"
+if confirm "Install Nginx"; then
+    # User wants to install Nginx - follow existing logic
 
-        # Reinstall Nginx
+    # Determine Nginx user and configuration paths based on distribution
+    NGINX_USER="www-data" # Default for Debian/Ubuntu
+    SITES_AVAILABLE="/etc/nginx/sites-available"
+    SITES_ENABLED="/etc/nginx/sites-enabled"
+
+    # Check if the distribution uses a different structure
+    if [ "$DISTRO" = "centos" ] || [ "$DISTRO" = "fedora" ] || [ "$DISTRO" = "rhel" ]; then
+        SITES_AVAILABLE="/etc/nginx/conf.d"
+        SITES_ENABLED="/etc/nginx/conf.d"
+        NGINX_USER="nginx"
+    elif [ "$DISTRO" = "alpine" ]; then
+        SITES_AVAILABLE="/etc/nginx/conf.d"
+        SITES_ENABLED="/etc/nginx/conf.d"
+        NGINX_USER="nginx"
+    fi
+
+    # Ensure www-data user and group exist
+    if [ "$NGINX_USER" = "www-data" ]; then
+        if ! getent group www-data >/dev/null; then
+            echo "Creating www-data group..."
+            groupadd www-data
+        fi
+
+        if ! id -u www-data >/dev/null 2>&1; then
+            echo "Creating www-data user..."
+            useradd -r -g www-data -s /usr/sbin/nologin -d /var/www www-data
+        fi
+    fi
+
+    # First check if nginx is already installed
+    if dpkg -l | grep -q nginx; then
+        echo "Nginx appears to be installed. Checking for issues..."
+        if ! systemctl is-active --quiet nginx; then
+            echo "Nginx service is not running. Attempting to fix by reinstalling..."
+            apt-get remove --purge -y nginx nginx-common nginx-full
+            rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
+
+            # Reinstall Nginx
+            apt-get update
+            apt-get install -y nginx
+        else
+            echo "Nginx is running properly."
+        fi
+    else
+        echo "Installing Nginx..."
         apt-get update
         apt-get install -y nginx
-    else
-        echo "Nginx is running properly."
     fi
-else
-    echo "Installing Nginx..."
-    apt-get update
-    apt-get install -y nginx
-fi
 
-# Verify nginx installation
-if ! dpkg -l | grep -q "^ii.*nginx"; then
-    echo "Failed to install Nginx. Please check system logs and try again."
-    exit 1
-fi
+    # Verify nginx installation
+    if ! dpkg -l | grep -q "^ii.*nginx"; then
+        echo "Failed to install Nginx. Please check system logs and try again."
+        exit 1
+    fi
 
-# Create necessary directories
-mkdir -p $SITES_AVAILABLE $SITES_ENABLED
+    # Set proper ownership for Nginx directories
+    echo "Setting proper ownership for Nginx directories..."
+    chown -R $NGINX_USER:$NGINX_USER /var/www
+    chown -R $NGINX_USER:$NGINX_USER /var/log/nginx
 
-# Backup original Nginx configuration
-if [ -f /etc/nginx/nginx.conf ]; then
-    echo "Backing up original Nginx configuration..."
-    cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d%H%M%S)
-fi
+    # Create necessary directories
+    mkdir -p $SITES_AVAILABLE $SITES_ENABLED
 
-# Create a basic Nginx configuration
-cat >/etc/nginx/nginx.conf <<EOF
+    # Backup original Nginx configuration
+    if [ -f /etc/nginx/nginx.conf ]; then
+        echo "Backing up original Nginx configuration..."
+        cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d%H%M%S)
+    fi
+
+    # Create a basic Nginx configuration
+    cat >/etc/nginx/nginx.conf <<EOF
 user $NGINX_USER;
 worker_processes auto;
 error_log /var/log/nginx/error.log warn;
@@ -585,118 +660,44 @@ http {
     
     access_log /var/log/nginx/access.log main;
     
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    types_hash_max_size 2048;
-    
-    # Include site configurations
 EOF
-
-# Add the appropriate include directive based on the distribution
-if [ "$DISTRO" = "centos" ] || [ "$DISTRO" = "fedora" ] || [ "$DISTRO" = "rhel" ] || [ "$DISTRO" = "alpine" ]; then
-    echo "    include $SITES_AVAILABLE/*.conf;" >>/etc/nginx/nginx.conf
 else
-    echo "    include $SITES_ENABLED/*.conf;" >>/etc/nginx/nginx.conf
-fi
+    # User doesn't want to install Nginx
+    echo "Skipping Nginx installation..."
 
-# Close the http block
-echo "}" >>/etc/nginx/nginx.conf
+    # Check if Nginx is already installed
+    if dpkg -l | grep -q nginx; then
+        echo "Nginx is already installed on this system."
+        echo "Do you want to completely remove all traces of Nginx?"
+        if confirm "Remove Nginx"; then
+            echo "Removing Nginx and all configuration files..."
+            apt-get remove --purge -y nginx nginx-common nginx-full
+            rm -rf /etc/nginx /var/log/nginx /var/lib/nginx
+            echo "Nginx has been completely removed from the system."
+        else
+            echo "Keeping existing Nginx installation."
 
-# Ensure mime.types exists
-if [ ! -f /etc/nginx/mime.types ]; then
-    echo "Creating mime.types file..."
-    cat >/etc/nginx/mime.types <<'EOF'
-types {
-    text/html                             html htm shtml;
-    text/css                              css;
-    text/xml                              xml;
-    image/gif                             gif;
-    image/jpeg                            jpeg jpg;
-    application/javascript                js;
-    application/atom+xml                  atom;
-    application/rss+xml                   rss;
+            # Determine Nginx user and configuration paths based on distribution
+            NGINX_USER="www-data" # Default for Debian/Ubuntu
+            SITES_AVAILABLE="/etc/nginx/sites-available"
+            SITES_ENABLED="/etc/nginx/sites-enabled"
 
-    text/mathml                           mml;
-    text/plain                            txt;
-    text/vnd.sun.j2me.app-descriptor      jad;
-    text/vnd.wap.wml                      wml;
-    text/x-component                      htc;
-
-    image/png                             png;
-    image/tiff                            tif tiff;
-    image/vnd.wap.wbmp                    wbmp;
-    image/x-icon                          ico;
-    image/x-jng                           jng;
-    image/x-ms-bmp                        bmp;
-    image/svg+xml                         svg svgz;
-    image/webp                            webp;
-
-    application/font-woff                 woff;
-    application/java-archive              jar war ear;
-    application/json                      json;
-    application/mac-binhex40              hqx;
-    application/msword                    doc;
-    application/pdf                       pdf;
-    application/postscript                ps eps ai;
-    application/rtf                       rtf;
-    application/vnd.apple.mpegurl         m3u8;
-    application/vnd.ms-excel              xls;
-    application/vnd.ms-fontobject         eot;
-    application/vnd.ms-powerpoint         ppt;
-    application/vnd.wap.wmlc              wmlc;
-    application/vnd.google-earth.kml+xml  kml;
-    application/vnd.google-earth.kmz      kmz;
-    application/x-7z-compressed           7z;
-    application/x-cocoa                   cco;
-    application/x-java-archive-diff       jardiff;
-    application/x-java-jnlp-file          jnlp;
-    application/x-makeself                run;
-    application/x-perl                    pl pm;
-    application/x-pilot                   prc pdb;
-    application/x-rar-compressed          rar;
-    application/x-redhat-package-manager  rpm;
-    application/x-sea                     sea;
-    application/x-shockwave-flash         swf;
-    application/x-stuffit                 sit;
-    application/x-tcl                     tcl tk;
-    application/x-x509-ca-cert            der pem crt;
-    application/x-xpinstall               xpi;
-    application/xhtml+xml                 xhtml;
-    application/xspf+xml                  xspf;
-    application/zip                       zip;
-
-    application/octet-stream              bin exe dll;
-    application/octet-stream              deb;
-    application/octet-stream              dmg;
-    application/octet-stream              iso img;
-    application/octet-stream              msi msp msm;
-
-    application/vnd.openxmlformats-officedocument.wordprocessingml.document    docx;
-    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet          xlsx;
-    application/vnd.openxmlformats-officedocument.presentationml.presentation  pptx;
-
-    audio/midi                            mid midi kar;
-    audio/mpeg                            mp3;
-    audio/ogg                             ogg;
-    audio/x-m4a                           m4a;
-    audio/x-realaudio                     ra;
-
-    video/3gpp                            3gpp 3gp;
-    video/mp2t                            ts;
-    video/mp4                             mp4;
-    video/mpeg                            mpeg mpg;
-    video/quicktime                       mov;
-    video/webm                            webm;
-    video/x-flv                           flv;
-    video/x-m4v                           m4v;
-    video/x-mng                           mng;
-    video/x-ms-asf                        asx asf;
-    video/x-ms-wmv                        wmv;
-    video/x-msvideo                       avi;
-}
-EOF
+            # Check if the distribution uses a different structure
+            if [ "$DISTRO" = "centos" ] || [ "$DISTRO" = "fedora" ] || [ "$DISTRO" = "rhel" ]; then
+                SITES_AVAILABLE="/etc/nginx/conf.d"
+                SITES_ENABLED="/etc/nginx/conf.d"
+                NGINX_USER="nginx"
+            elif [ "$DISTRO" = "alpine" ]; then
+                SITES_AVAILABLE="/etc/nginx/conf.d"
+                SITES_ENABLED="/etc/nginx/conf.d"
+                NGINX_USER="nginx"
+            fi
+        fi
+    else
+        echo "Nginx is not installed. Skipping Nginx configuration."
+        # Set variables to indicate Nginx is not available
+        NGINX_AVAILABLE=false
+    fi
 fi
 
 # Step 4: Clone or update repository

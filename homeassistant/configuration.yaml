@@ -14,6 +14,8 @@ http:
   use_x_forwarded_for: true
   trusted_proxies:
     - 127.0.0.1
+    - ::1
+    - 192.168.100.52
 template:
   - sensor:
       - name: Total Power Consumption
@@ -44,3 +46,4 @@ template:
         unique_id: energy_meter_consumption_in_price
         state: "{{ 
         states('sensor.total_energy_consumption')|float(0)*0.435 if states('sensor.total_energy_consumption')|float(0) < 200 else states('sensor.total_energy_consumption')|float(0)*0.59 }}"
+
